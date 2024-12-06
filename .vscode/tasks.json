@@ -7,14 +7,17 @@
             "command": "g++",
             "args": [
                 "-std=c++17",
+                "-g",
+                "${file}",
                 "-o",
-                "tsp",
-                "tsp.cpp"
+                "${fileDirname}/${fileBasenameNoExtension}"
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
-            }
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Generated task by user"
         }
     ]
 }
