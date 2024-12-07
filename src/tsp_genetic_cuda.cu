@@ -1,267 +1,429 @@
 #include <iostream>
-#include <vector>
 #include <algorithm>
-#include <numeric>
-#include <random>
-#include <tuple>
-#include <chrono>
-#include <cassert>
+#include <cstdio>
+#include <curand_kernel.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <vector>
 #include "../include/testcases.h"
+#include <chrono>
 
 using namespace std;
 
-/////////////////////////////////////////////
-// CUDA KERNELS AND DEVICE FUNCTIONS
-/////////////////////////////////////////////
+// Error checking macro
+#define CUDA_CHECK(call)                                                                              \
+    do                                                                                                \
+    {                                                                                                 \
+        cudaError_t err = call;                                                                       \
+        if (err != cudaSuccess)                                                                       \
+        {                                                                                             \
+            fprintf(stderr, "CUDA Error %s:%d: '%s'\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
+            exit(EXIT_FAILURE);                                                                       \
+        }                                                                                             \
+    } while (0)
 
-__global__ void calculateFitnessKernel(const int *distanceMatrix, const int *population, double *fitnessArray,
-                                       int numCities, int populationSize)
+//------------------------------------------------------
+// Kernel Parameters (Adjust as Needed)
+#define BLOCK_SIZE 128
+
+//------------------------------------------------------
+// Device Kernels
+
+// Setup Curand States
+__global__ void setupCurandStates(curandState *states, unsigned long long seed, int populationSize)
 {
-    // Each thread corresponds to one individual
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= populationSize)
-        return;
-
-    // Compute distance of the idx-th individual's tour
-    // population is laid out as [tour0_city0, tour0_city1, ..., tour0_cityN-1, tour1_city0, ...]
-    const int *individual = &population[idx * numCities];
-
-    double totalDistance = 0.0;
-    for (int i = 0; i < numCities - 1; ++i)
+    if (idx < populationSize)
     {
-        int from = individual[i];
-        int to = individual[i + 1];
-        totalDistance += distanceMatrix[from * numCities + to];
+        curand_init(seed, idx, 0, &states[idx]);
     }
-    // Close the loop
-    {
-        int from = individual[numCities - 1];
-        int to = individual[0];
-        totalDistance += distanceMatrix[from * numCities + to];
-    }
-
-    // Fitness is inverse of distance
-    fitnessArray[idx] = 1.0 / totalDistance;
 }
 
-/////////////////////////////////////////////
-// GENETIC ALGORITHM CLASS
-/////////////////////////////////////////////
-
-class GeneticAlgorithmTSPCuda
+// Initialize Population:
+// Each individual is a permutation of [0 ... numCities-1].
+// A simple approach: start with identity and perform a series of swaps per individual.
+__global__ void initPopulationKernel(int *d_population, curandState *states, int populationSize, int numCities)
 {
-private:
-    vector<vector<int>> weights;
-    size_t populationSize;
-    size_t generations;
-    double mutationRate;
-
-    mt19937 rng;
-
-    double calculateTourDistance(const vector<int> &tour) const
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < populationSize)
     {
-        double totalDistance = 0.0;
-        for (size_t i = 0; i < tour.size() - 1; ++i)
-            totalDistance += weights[tour[i]][tour[i + 1]];
-        totalDistance += weights[tour.back()][tour.front()];
-        return totalDistance;
-    }
-
-    double calculateFitness(const vector<int> &tour) const
-    {
-        return 1.0 / calculateTourDistance(tour);
-    }
-
-    // Order Crossover (similar to OX)
-    vector<int> orderCrossover(const vector<int> &parent1, const vector<int> &parent2)
-    {
-        size_t n = parent1.size();
-        vector<int> child(n, -1);
-
-        uniform_int_distribution<size_t> dist(0, n - 1);
-        size_t start = dist(rng);
-        size_t end = dist(rng);
-        if (start > end)
-            swap(start, end);
-
-        // Copy segment from parent1
-        for (size_t i = start; i <= end; ++i)
+        int start = idx * numCities;
+        // Initialize as identity permutation
+        for (int i = 0; i < numCities; i++)
         {
-            child[i] = parent1[i];
+            d_population[start + i] = i;
+        }
+        // Shuffle using Fisher-Yates
+        curandState localState = states[idx];
+        for (int i = numCities - 1; i > 0; i--)
+        {
+            int j = (int)(curand_uniform(&localState) * (i + 1));
+            int temp = d_population[start + i];
+            d_population[start + i] = d_population[start + j];
+            d_population[start + j] = temp;
+        }
+        states[idx] = localState;
+    }
+}
+
+// Fitness Kernel: Compute fitness = 1/distance for each individual
+__global__ void fitnessKernel(const int *d_distanceMatrix, const int *d_population, double *d_fitness,
+                              int numCities, int populationSize)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < populationSize)
+    {
+        const int start = idx * numCities;
+        double dist = 0.0;
+        for (int i = 0; i < numCities - 1; i++)
+        {
+            int from = d_population[start + i];
+            int to = d_population[start + i + 1];
+            dist += d_distanceMatrix[from * numCities + to];
+        }
+        // close the loop
+        int last = d_population[start + numCities - 1];
+        int first = d_population[start];
+        dist += d_distanceMatrix[last * numCities + first];
+        d_fitness[idx] = 1.0 / dist;
+    }
+}
+
+// Find Best Individual Kernel
+// Single-block reduction for simplicity (assumes populationSize <= blockDim.x *gridDim.x adequately)
+__global__ void findBestKernel(const int *d_population, const double *d_fitness, int *d_bestTour, double *d_bestFitness,
+                               int populationSize, int numCities)
+{
+    extern __shared__ double s_fitness[];
+    __shared__ int s_indices[BLOCK_SIZE];
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int tid = threadIdx.x;
+
+    double val = -1.0;
+    int bestIdx = -1;
+    if (idx < populationSize)
+    {
+        val = d_fitness[idx];
+        bestIdx = idx;
+    }
+
+    s_fitness[tid] = val;
+    s_indices[tid] = bestIdx;
+
+    __syncthreads();
+
+    // Reduce to find max fitness
+    for (int s = blockDim.x / 2; s > 0; s >>= 1)
+    {
+        // reduce all of the larger values to the first half
+        if (tid < s && s_fitness[tid] < s_fitness[tid + s])
+        {
+            s_fitness[tid] = s_fitness[tid + s];
+            s_indices[tid] = s_indices[tid + s];
+        }
+        __syncthreads();
+    }
+
+    // The best in this block
+    if (tid == 0)
+    {
+        // TODO: use thrust max_element to find the max from an device global array
+        // Atomically compare with global best
+        double oldVal = atomicMax(
+            (unsigned long long *)d_bestFitness,
+            __double_as_longlong(s_fitness[0]));
+        double currentBestVal = __longlong_as_double(
+            atomicCAS(
+                (unsigned long long *)d_bestFitness,
+                __double_as_longlong(oldVal),
+                __double_as_longlong(oldVal)));
+
+        // if our found is better, update best tour
+        if (s_fitness[0] > currentBestVal)
+        {
+            // Copy best individual's tour
+            int bestPopIdx = s_indices[0];
+            for (int i = 0; i < numCities; i++)
+            {
+                // Note: This is not atomic, so there's a race if multiple blocks find better at the same time.
+                // For a more robust solution, we can handle best tracking differently.
+                d_bestTour[i] = d_population[bestPopIdx * numCities + i];
+            }
+            *d_bestFitness = s_fitness[0];
+        }
+    }
+}
+
+// Tournament Selection Kernel:
+// We'll select pairs of parents from top 50% of population based on fitness.
+//
+// For simplicity, assume populationSize is even, and we produce offspring for the bottom 50%.
+// Each thread handles one offspring index in the bottom half.
+// We'll pick two parents by tournament from the top half.
+__global__ void selectionKernel(const double *d_fitness, int *d_population, int populationSize,
+                                int numCities, curandState *states)
+{
+    int half = populationSize / 2;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // idx indexes into the bottom half
+    if (idx < half)
+    {
+        int offspringIdx = half + idx; // where to place offspring
+
+        curandState localState = states[idx];
+
+        // tournament for parent1
+        int p1 = (int)(curand_uniform(&localState) * half);
+        int p2 = (int)(curand_uniform(&localState) * half);
+        int parent1 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
+
+        // tournament for parent2
+        p1 = (int)(curand_uniform(&localState) * half);
+        p2 = (int)(curand_uniform(&localState) * half);
+        int parent2 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
+
+        // Store chosen parents in place somehow?
+        // We'll rely on crossover kernel to read from these indices
+        // Let's store parent indices at the offspring location temporarily:
+        // The crossover kernel will interpret these as parent indices.
+        // This is a trick: we temporarily store negative indices to differentiate.
+        // Another approach: we could use a separate array for parent indices.
+        d_population[offspringIdx * numCities] = parent1;
+        d_population[offspringIdx * numCities + 1] = parent2;
+
+        states[idx] = localState;
+    }
+}
+
+// Crossover Kernel (Order Crossover In-Place):
+// We know that the bottom half of the population currently holds temporary parent indices at [offspringIdx*numCities ...],
+// specifically at the first two positions. We will read parent tours from the top half and overwrite the offspring tours.
+__global__ void crossoverKernel(int *d_population, int populationSize, int numCities, curandState *states)
+{
+    int half = populationSize / 2;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < half)
+    {
+        int offspringIdx = half + idx;
+        curandState localState = states[idx];
+
+        // Retrieve parents
+        int parent1 = d_population[offspringIdx * numCities]; 
+        int parent2 = d_population[offspringIdx * numCities + 1];
+
+        // Perform order crossover
+        int start = (int)(curand_uniform(&localState) * numCities);
+        int end = (int)(curand_uniform(&localState) * numCities);
+        if (start > end)
+        {
+            int tmp = start;
+            start = end;
+            end = tmp;
         }
 
-        // Fill remaining positions from parent2
-        size_t currentIndex = 0;
-        for (size_t i = 0; i < n; ++i)
+        // Copy parent1 segment
+        int *child = &d_population[offspringIdx * numCities];
+        int *p1 = &d_population[parent1 * numCities];
+        int *p2 = &d_population[parent2 * numCities];
+
+        // Mark child as empty
+        for (int i = 0; i < numCities; i++)
         {
-            if (find(child.begin(), child.end(), parent2[i]) == child.end())
+            child[i] = -1;
+        }
+
+        for (int i = start; i <= end; i++)
+        {
+            child[i] = p1[i];
+        }
+
+        int currentIndex = 0;
+        for (int i = 0; i < numCities; i++)
+        {
+            int val = p2[i];
+            bool found = false;
+            // Check if val is already in child
+            // TODO: For large numCities, consider optimization or a hash table approach
+            for (int j = start; j <= end; j++)
             {
+                if (child[j] == val)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+            {
+                // find next available slot
                 while (child[currentIndex] != -1)
                     currentIndex++;
-                child[currentIndex] = parent2[i];
+                child[currentIndex] = val;
             }
         }
-        return child;
+
+        states[idx] = localState;
     }
+}
 
-    // Swap Mutation
-    void swapMutation(vector<int> &tour)
+// Mutation Kernel (Swap mutation):
+// Mutate bottom half of the population.
+// Randomly swap two cities in each individual.
+__global__ void mutationKernel(int *d_population, int populationSize, int numCities, double mutationRate, curandState *states)
+{
+    int half = populationSize / 2;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < half)
     {
-        uniform_int_distribution<size_t> dist(0, tour.size() - 1);
-        size_t i = dist(rng);
-        size_t j = dist(rng);
-        std::swap(tour[i], tour[j]);
-    }
+        int offspringIdx = half + idx;
+        curandState localState = states[idx];
 
-    // Device-related helper functions
-    // Flatten distance matrix
-    void flattenDistanceMatrix(const vector<vector<int>> &matrix, vector<int> &flat)
-    {
-        int n = (int)matrix.size();
-        flat.resize(n * n);
-        for (int i = 0; i < n; i++)
-            for (int j = 0; j < n; j++)
-                flat[i * n + j] = matrix[i][j];
-    }
-
-public:
-    GeneticAlgorithmTSPCuda(const vector<vector<int>> &distanceMatrix,
-                            size_t popSize = 100,
-                            size_t gen = 1000,
-                            double mutation = 0.1)
-        : weights(distanceMatrix),
-          populationSize(popSize),
-          generations(gen),
-          mutationRate(mutation),
-          rng(random_device{}()) {}
-
-    tuple<vector<int>, double> solve()
-    {
-        size_t numCities = weights.size();
-        vector<vector<int>> population(populationSize, vector<int>(numCities));
-
-        // Initialize population
-        for (auto &tour : population)
+        if (curand_uniform(&localState) < mutationRate)
         {
-            iota(tour.begin(), tour.end(), 0);
-            shuffle(tour.begin(), tour.end(), rng);
+            int i = (int)(curand_uniform(&localState) * numCities);
+            int j = (int)(curand_uniform(&localState) * numCities);
+            int *child = &d_population[offspringIdx * numCities];
+            int temp = child[i];
+            child[i] = child[j];
+            child[j] = temp;
         }
 
-        vector<int> bestTour;
-        double bestFitness = 0.0;
-
-        // Flatten distance matrix for GPU
-        vector<int> flatDist;
-        flattenDistanceMatrix(weights, flatDist);
-        int n = (int)numCities;
-        int popSize = (int)populationSize;
-
-        // Allocate GPU memory
-        int *d_distanceMatrix = nullptr;
-        int *d_population = nullptr;
-        double *d_fitnessArray = nullptr;
-
-        cudaMalloc((void **)&d_distanceMatrix, n * n * sizeof(int));
-        cudaMalloc((void **)&d_population, popSize * n * sizeof(int));
-        cudaMalloc((void **)&d_fitnessArray, popSize * sizeof(double));
-
-        cudaMemcpy(d_distanceMatrix, flatDist.data(), n * n * sizeof(int), cudaMemcpyHostToDevice);
-
-        for (size_t gen = 0; gen < generations; ++gen)
-        {
-            // Flatten population
-            vector<int> flatPop(popSize * n);
-            for (int i = 0; i < popSize; i++)
-            {
-                for (int j = 0; j < n; j++)
-                {
-                    flatPop[i * n + j] = population[i][j];
-                }
-            }
-
-            cudaMemcpy(d_population, flatPop.data(), popSize * n * sizeof(int), cudaMemcpyHostToDevice);
-
-            // Run kernel to compute fitness
-            int blockSize = 128;
-            int gridSize = (popSize + blockSize - 1) / blockSize;
-            calculateFitnessKernel<<<gridSize, blockSize>>>(d_distanceMatrix, d_population, d_fitnessArray, n, popSize);
-            cudaDeviceSynchronize();
-
-            // Copy fitness results back
-            vector<double> fitnessScoresHost(popSize);
-            cudaMemcpy(fitnessScoresHost.data(), d_fitnessArray, popSize * sizeof(double), cudaMemcpyDeviceToHost);
-
-            // Pair fitness with tours
-            vector<pair<double, vector<int>>> fitnessScores;
-            fitnessScores.reserve(popSize);
-            for (int i = 0; i < popSize; i++)
-            {
-                double f = fitnessScoresHost[i];
-                if (f > bestFitness)
-                {
-                    bestFitness = f;
-                    bestTour = population[i];
-                }
-                fitnessScores.push_back({f, population[i]});
-            }
-
-            // Sort by fitness descending
-            sort(fitnessScores.rbegin(), fitnessScores.rend());
-
-            // Elitism
-            vector<vector<int>> newPopulation;
-            newPopulation.push_back(fitnessScores[0].second);
-
-            // Selection/Crossover/Mutation
-            uniform_int_distribution<size_t> dist(0, populationSize / 2);
-            while (newPopulation.size() < populationSize)
-            {
-                size_t p1 = dist(rng);
-                size_t p2 = dist(rng);
-                auto child = orderCrossover(fitnessScores[p1].second, fitnessScores[p2].second);
-
-                if (uniform_real_distribution<double>(0.0, 1.0)(rng) < mutationRate)
-                {
-                    swapMutation(child);
-                }
-
-                newPopulation.push_back(child);
-            }
-
-            population = move(newPopulation);
-        }
-
-        // Cleanup GPU memory
-        cudaFree(d_distanceMatrix);
-        cudaFree(d_population);
-        cudaFree(d_fitnessArray);
-
-        double bestDistance = 1.0 / bestFitness;
-        return {bestTour, bestDistance};
+        states[idx] = localState;
     }
-};
+}
+
+//------------------------------------------------------
+// Host Code (Example)
 
 int main()
 {
-    for (size_t i = 0; i < testcases.size(); ++i)
+    // Genetic Algorithm parameters
+    int generations = 1000;
+    double mutationRate = 0.1;
+    int populationSize = 512;
+
+    // Iterate over test cases defined in testcases.h
+    for (size_t test_i = 0; test_i < testcases.size(); ++test_i)
     {
-        const auto &[distanceMatrix, expected] = testcases[i];
-        // timing for cuda kernel
-        auto start_time = chrono::high_resolution_clock::now();
+        const auto &[distanceMatrix, expectedDistance] = testcases[test_i];
 
-        GeneticAlgorithmTSPCuda ga(distanceMatrix);
+        // timing
+        auto start = chrono::high_resolution_clock::now();
+        int numCities = (int)distanceMatrix.size();
 
-        auto [bestTour, bestDistance] = ga.solve();
+        // Flatten distance matrix
+        std::vector<int> h_distanceMatrix(numCities * numCities);
+        for (int row = 0; row < numCities; row++)
+        {
+            for (int col = 0; col < numCities; col++)
+            {
+                h_distanceMatrix[row * numCities + col] = distanceMatrix[row][col];
+            }
+        }
 
-        auto end_time = chrono::high_resolution_clock::now();
-        chrono::duration<double> elapsed_time = end_time - start_time;
-        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
-        cout << "Best Tour: ";
-        for (int city : bestTour)
-            cout << city << " ";
-        cout << "\nBest Distance: " << bestDistance << endl;
-        cout << "Expected Distance: " << expected << endl;
-        cout << "-----------------------------------------\n";
+        // Device memory
+        int *d_population, *d_distanceMatrix, *d_bestTour;
+        double *d_fitness, *d_bestFitness;
+        curandState *d_states;
+
+        CUDA_CHECK(cudaMalloc(&d_population, sizeof(int) * populationSize * numCities));
+        CUDA_CHECK(cudaMalloc(&d_distanceMatrix, sizeof(int) * numCities * numCities));
+        CUDA_CHECK(cudaMalloc(&d_fitness, sizeof(double) * populationSize));
+        CUDA_CHECK(cudaMalloc(&d_bestTour, sizeof(int) * numCities));
+        CUDA_CHECK(cudaMalloc(&d_bestFitness, sizeof(double)));
+        CUDA_CHECK(cudaMalloc(&d_states, sizeof(curandState) * populationSize));
+
+        CUDA_CHECK(cudaMemcpy(d_distanceMatrix, h_distanceMatrix.data(), sizeof(int) * numCities * numCities, cudaMemcpyHostToDevice));
+
+        // Initialize bestFitness to a very low value
+        double initVal = -1e9;
+        CUDA_CHECK(cudaMemcpy(d_bestFitness, &initVal, sizeof(double), cudaMemcpyHostToDevice));
+
+        // Setup curand states
+        {
+            int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            setupCurandStates<<<grid, BLOCK_SIZE>>>(d_states, 1234ULL, populationSize);
+            cudaDeviceSynchronize();
+        }
+
+        // Initialize population
+        {
+            int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            initPopulationKernel<<<grid, BLOCK_SIZE>>>(d_population, d_states, populationSize, numCities);
+            cudaDeviceSynchronize();
+        }
+
+        // Main GA loop
+        for (int gen = 0; gen < generations; gen++)
+        {
+            // Compute fitness
+            {
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                fitnessKernel<<<grid, BLOCK_SIZE>>>(d_distanceMatrix, d_population, d_fitness, numCities, populationSize);
+                cudaDeviceSynchronize();
+            }
+
+            // Find best
+            {
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                findBestKernel<<<grid, BLOCK_SIZE, BLOCK_SIZE * (sizeof(double) + sizeof(int))>>>(d_population, d_fitness, d_bestTour, d_bestFitness, populationSize, numCities);
+                cudaDeviceSynchronize();
+            }
+
+            // Selection
+            // Select 2 parents from the top 50% of the population
+            {
+                int half = populationSize / 2;
+                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                selectionKernel<<<grid, BLOCK_SIZE>>>(d_fitness, d_population, populationSize, numCities, d_states);
+                cudaDeviceSynchronize();
+            }
+
+            // Crossover
+            // Crossover the selected parents pairs, replacing the bottom 50% of the population
+            {
+                int half = populationSize / 2;
+                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                crossoverKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, d_states);
+                cudaDeviceSynchronize();
+            }
+
+            // Mutation
+            {
+                int half = populationSize / 2;
+                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                mutationKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, mutationRate, d_states);
+                cudaDeviceSynchronize();
+            }
+        }
+
+        // Copy back best result
+        double hostBestFitness;
+        std::vector<int> hostBestTour(numCities);
+        CUDA_CHECK(cudaMemcpy(&hostBestFitness, d_bestFitness, sizeof(double), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(hostBestTour.data(), d_bestTour, sizeof(int) * numCities, cudaMemcpyDeviceToHost));
+
+        double bestDistance = 1.0 / hostBestFitness;
+        // timing
+        auto end = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed_time = end - start;
+        std::cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
+        std::cout << "Test Case " << test_i << ":\n";
+        std::cout << "Best Distance Found: " << bestDistance << "\n";
+        std::cout << "Expected Distance: " << expectedDistance << "\n";
+        std::cout << "Best Tour: ";
+        for (auto c : hostBestTour)
+            std::cout << c << " ";
+        std::cout << "\n-----------------------------------------\n";
+
+        // Clean up
+        CUDA_CHECK(cudaFree(d_population));
+        CUDA_CHECK(cudaFree(d_distanceMatrix));
+        CUDA_CHECK(cudaFree(d_fitness));
+        CUDA_CHECK(cudaFree(d_bestTour));
+        CUDA_CHECK(cudaFree(d_bestFitness));
+        CUDA_CHECK(cudaFree(d_states));
     }
+
     return 0;
 }

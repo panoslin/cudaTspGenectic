@@ -60,6 +60,8 @@
         "__nullptr": "cpp",
         "__bit_reference": "cpp",
         "map": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "shared_mutex": "cpp",
+        "cfenv": "cpp"
     }
 }

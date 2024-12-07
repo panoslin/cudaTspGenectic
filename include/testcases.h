@@ -5,6 +5,7 @@
 #include <utility>
 
 using namespace std;
+using CostPathPair = pair<double, vector<int>>;
 
 const vector<pair<vector<vector<int>>, int>> testcases = {
     // Test Case 1
@@ -63,7 +64,19 @@ const vector<pair<vector<vector<int>>, int>> testcases = {
       {18, 36, 53, 69, 84, 98, 111, 123, 134, 144, 153, 161, 168, 174, 179, 183, 186, 188, 0, 190},
       {19, 37, 54, 70, 85, 99, 112, 124, 135, 145, 154, 162, 169, 175, 180, 184, 187, 189, 190, 0}},
      1670},
-
+    make_pair(vector<vector<int>>(25, vector<int>(25, 1)), 25),
+    make_pair(vector<vector<int>>(30, vector<int>(30, 1)), 30),
+    make_pair(vector<vector<int>>(40, vector<int>(40, 1)), 40),
+    make_pair(vector<vector<int>>(50, vector<int>(50, 1)), 50),
+    make_pair(vector<vector<int>>(60, vector<int>(60, 1)), 60),
+    make_pair(vector<vector<int>>(120, vector<int>(120, 1)), 120),
+    make_pair(vector<vector<int>>(240, vector<int>(240, 1)), 240),
+    make_pair(vector<vector<int>>(480, vector<int>(480, 1)), 480),
+     make_pair(vector<vector<int>>(960, vector<int>(960, 1)),960),
+    //  make_pair(vector<vector<int>>(1920, vector<int>(1920, 1)),1920),
+    //  make_pair(vector<vector<int>>(3840, vector<int>(3840, 1)),3840),
+    //  make_pair(vector<vector<int>>(7680, vector<int>(7680, 1)),7680),
+    //  make_pair(vector<vector<int>>(15360, vector<int>(15360, 1)),15360),
 };
 
 #endif
