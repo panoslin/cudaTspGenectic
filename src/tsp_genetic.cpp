@@ -161,11 +161,18 @@ int main()
     for (size_t i = 0; i < testcases.size(); ++i)
     {
         const auto &[distanceMatrix, expected] = testcases[i];
+
+        auto start_time = chrono::high_resolution_clock::now();
+
         // Create GeneticAlgorithmTSP instance
         GeneticAlgorithmTSP ga(distanceMatrix);
 
         // Solve the TSP
         auto [bestTour, bestDistance] = ga.solve();
+
+        auto end_time = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed_time = end_time - start_time;
+        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
 
         // Output the results
         cout << "Best Tour: ";
