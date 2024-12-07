@@ -7,8 +7,6 @@
 
 using namespace std;
 
-using CostPathPair = pair<double, vector<int>>;
-
 class TSP
 {
 public:

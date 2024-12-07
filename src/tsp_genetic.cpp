@@ -29,7 +29,7 @@ private:
         {
             totalDistance += weights[tour[i]][tour[i + 1]];
         }
-        totalDistance += weights[tour.back()][tour.front()]; // Return to start
+        totalDistance += weights[tour.back()][tour.front()];
         return totalDistance;
     }
 
@@ -95,7 +95,7 @@ public:
                                  rng(random_device{}()) {}
 
     // Solve the TSP using Genetic Algorithm
-    tuple<vector<int>, double> solve()
+    CostPathPair solve()
     {
         size_t numCities = weights.size();
         vector<vector<int>> population(populationSize, vector<int>(numCities));
@@ -103,7 +103,7 @@ public:
         // Initialize population with random tours
         for (auto &tour : population)
         {
-            iota(tour.begin(), tour.end(), 0); // [0, 1, 2, ..., n-1]
+            iota(tour.begin(), tour.end(), 0);
             shuffle(tour.begin(), tour.end(), rng);
         }
 
@@ -113,7 +113,7 @@ public:
         for (size_t gen = 0; gen < generations; ++gen)
         {
             // Calculate fitness for all individuals
-            vector<pair<double, vector<int>>> fitnessScores;
+            vector<CostPathPair> fitnessScores;
             for (const auto &tour : population)
             {
                 double fitness = calculateFitness(tour);
@@ -132,12 +132,13 @@ public:
             vector<vector<int>> newPopulation = {fitnessScores[0].second};
 
             // Selection, Crossover, and Mutation
+            uniform_int_distribution<size_t> dist(0, populationSize / 2);
             while (newPopulation.size() < populationSize)
             {
-                uniform_int_distribution<size_t> dist(0, populationSize / 2); // Select from top 50%
                 size_t p1 = dist(rng);
                 size_t p2 = dist(rng);
 
+                // Perform order crossover
                 auto child = orderCrossover(fitnessScores[p1].second, fitnessScores[p2].second);
 
                 // Apply mutation with a given probability
@@ -152,7 +153,7 @@ public:
             population = move(newPopulation);
         }
 
-        return {bestTour, calculateTourDistance(bestTour)};
+        return {calculateTourDistance(bestTour), bestTour};
     }
 };
 
@@ -168,7 +169,7 @@ int main()
         GeneticAlgorithmTSP ga(distanceMatrix);
 
         // Solve the TSP
-        auto [bestTour, bestDistance] = ga.solve();
+        auto [bestDistance, bestTour] = ga.solve();
 
         auto end_time = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed_time = end_time - start_time;
