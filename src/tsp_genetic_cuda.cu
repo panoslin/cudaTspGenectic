@@ -161,6 +161,34 @@ __global__ void findBestKernel(
     }
 }
 
+__global__ void copyBestIndividualKernel(
+    const double *d_fitness, // Fitness array
+    int *d_population,       // Population array
+    int populationSize,      // Number of individuals in the population
+    int numCities)           // Number of cities in the TSP
+{
+    if (threadIdx.x == 0 && blockIdx.x == 0)
+    {
+        // Find the best individual
+        double bestFitness = -1.0;
+        int bestIdx = 0;
+        for (int i = 0; i < populationSize; i++)
+        {
+            if (d_fitness[i] > bestFitness)
+            {
+                bestFitness = d_fitness[i];
+                bestIdx = i;
+            }
+        }
+
+        // Copy the best individual into the first position of the next generation
+        for (int j = 0; j < numCities; j++)
+        {
+            d_population[j] = d_population[bestIdx * numCities + j];
+        }
+    }
+}
+
 // Tournament Selection Kernel:
 // We'll select pairs of parents from top 50% of population based on fitness.
 //
@@ -220,6 +248,7 @@ __global__ void crossoverKernel(int *d_population, int populationSize, int numCi
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < half)
     {
+        // TODO: we should replace the whole population
         int offspringIdx = half + idx;
         curandState localState = states[idx];
 
@@ -335,6 +364,11 @@ int main(int argc, char **argv)
     cout << "Mutation Rate: " << mutationRate << "\n";
     cout << "Population Size: " << populationSize << "\n\n";
 
+    size_t stagnationCounter = 0;           // Tracks stagnation
+    double epsilon = 1e-9;                  // Minimum improvement considered significant
+    size_t maxStagnationGenerations = 8000; // Maximum allowed stagnation generations
+    double previousBestFitness = 0.0;       // Fitness from the previous generation
+
     // Iterate over test cases defined in testcases.h
     for (size_t test_i = 0; test_i < testcases.size(); ++test_i)
     {
@@ -386,11 +420,6 @@ int main(int argc, char **argv)
             cudaDeviceSynchronize();
         }
 
-        size_t stagnationCounter = 0;           // Tracks stagnation
-        double epsilon = 1e-9;                  // Minimum improvement considered significant
-        size_t maxStagnationGenerations = 3000; // Maximum allowed stagnation generations
-        double previousBestFitness = 0.0;       // Fitness from the previous generation
-
         // Main GA loop
         for (int gen = 0; gen < generations; gen++)
         {
@@ -432,6 +461,7 @@ int main(int argc, char **argv)
                 break;
             }
 
+
             // Selection
             // Select 2 parents from the top 50% of the population
             {
@@ -441,6 +471,7 @@ int main(int argc, char **argv)
                 cudaDeviceSynchronize();
             }
 
+            copyBestIndividualKernel<<<1, 1>>>(d_fitness, d_population, populationSize, numCities);
             // Crossover
             // Crossover the selected parents pairs, replacing the bottom 50% of the population
             {
