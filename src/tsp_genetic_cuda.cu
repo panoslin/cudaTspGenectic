@@ -152,6 +152,7 @@ __global__ void findBestKernel(
             int bestPopIdx = s_indices[0];
             for (int i = 0; i < numCities; i++)
             {
+                // TODO: FIX THIS
                 // Note: This is not atomic, so there's a race if multiple blocks find better at the same time.
                 // For a more robust solution, we can handle best tracking differently.
                 d_bestTour[i] = d_population[bestPopIdx * numCities + i];
@@ -162,39 +163,22 @@ __global__ void findBestKernel(
 }
 
 __global__ void copyBestIndividualKernel(
-    const double *d_fitness, // Fitness array
-    int *d_population,       // Population array
-    int populationSize,      // Number of individuals in the population
-    int numCities)           // Number of cities in the TSP
+    int *d_bestTour, // Best tour
+    double *d_bestFitness,
+    int *d_population,  // Population array
+    int populationSize, // Number of individuals in the population
+    int numCities)      // Number of cities in the TSP
 {
     if (threadIdx.x == 0 && blockIdx.x == 0)
     {
-        // Find the best individual
-        double bestFitness = -1.0;
-        int bestIdx = 0;
-        for (int i = 0; i < populationSize; i++)
-        {
-            if (d_fitness[i] > bestFitness)
-            {
-                bestFitness = d_fitness[i];
-                bestIdx = i;
-            }
-        }
-
-        // Copy the best individual into the first position of the next generation
+        // Copy the best tour into the first position of the next generation
         for (int j = 0; j < numCities; j++)
         {
-            d_population[j] = d_population[bestIdx * numCities + j];
+            d_population[j] = d_bestTour[j];
         }
     }
 }
 
-// Tournament Selection Kernel:
-// We'll select pairs of parents from top 50% of population based on fitness.
-//
-// For simplicity, assume populationSize is even, and we produce offspring for the bottom 50%.
-// Each thread handles one offspring index in the bottom half.
-// We'll pick two parents by tournament from the top half.
 __global__ void selectionKernel(
     const double *d_fitness,
     int *d_population,
@@ -204,113 +188,124 @@ __global__ void selectionKernel(
 {
     int half = populationSize / 2;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < half)
-    {
-        int offspringIdx = half + idx;
 
-        curandState localState = states[idx];
+    // Skip the top one individual
+    if (idx == 0 || idx >= populationSize - 1)
+        return;
 
-        // tournament for parent1
-        int p1 = (int)(curand_uniform(&localState) * half);
-        if (p1 >= half)
-            p1 = half - 1;
-        int p2 = (int)(curand_uniform(&localState) * half);
-        if (p2 >= half)
-            p2 = half - 1;
-        int parent1 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
+    int offspringIdx = idx;
 
-        // tournament for parent2
-        p1 = (int)(curand_uniform(&localState) * half);
-        if (p1 >= half)
-            p1 = half - 1;
-        p2 = (int)(curand_uniform(&localState) * half);
-        if (p2 >= half)
-            p2 = half - 1;
-        int parent2 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
+    curandState localState = states[idx];
 
-        // Store chosen parents in place
-        // We'll rely on crossover kernel to read from these indices
-        // Let's store parent indices at the offspring location temporarily:
-        // The crossover kernel will interpret these as parent indices.
-        d_population[offspringIdx * numCities] = parent1;
-        d_population[offspringIdx * numCities + 1] = parent2;
+    // Tournament for parent1
+    int p1 = (int)(curand_uniform(&localState) * half);
+    if (p1 >= half)
+        p1 = half - 1;
+    int p2 = (int)(curand_uniform(&localState) * half);
+    if (p2 >= half)
+        p2 = half - 1;
+    int parent1 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
 
-        states[idx] = localState;
-    }
+    // Tournament for parent2
+    p1 = (int)(curand_uniform(&localState) * half);
+    if (p1 >= half)
+        p1 = half - 1;
+    p2 = (int)(curand_uniform(&localState) * half);
+    if (p2 >= half)
+        p2 = half - 1;
+    int parent2 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
+
+    // Store chosen parents at the offspring location temporarily
+    d_population[offspringIdx * numCities] += parent1 * (numCities + 1);
+    d_population[offspringIdx * numCities + 1] += parent2 * (numCities + 1);
+
+    states[idx] = localState;
 }
 
-// Crossover Kernel (Order Crossover In-Place):
-// We know that the bottom half of the population currently holds temporary parent indices at [offspringIdx*numCities ...],
-// specifically at the first two positions. We will read parent tours from the top half and overwrite the offspring tours.
 __global__ void crossoverKernel(int *d_population, int populationSize, int numCities, curandState *states)
 {
-    int half = populationSize / 2;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < half)
+
+    // Skip the top one individual
+    if (idx == 0 || idx >= populationSize)
+        return;
+
+    int offspringIdx = idx;
+    curandState localState = states[idx];
+
+    // Retrieve parents
+    int parent1 = d_population[offspringIdx * numCities] / (numCities + 1);
+    int parent2 = d_population[offspringIdx * numCities + 1] / (numCities + 1);
+
+    // Restore gene from masked values
+    d_population[offspringIdx * numCities] -= parent1 * (numCities + 1);
+    d_population[offspringIdx * numCities + 1] -= parent2 * (numCities + 1);
+
+    // Perform order crossover
+    int start = (int)(curand_uniform(&localState) * numCities);
+    if (start >= numCities)
+        start = numCities - 1;
+    int end = (int)(curand_uniform(&localState) * numCities);
+    if (end >= numCities)
+        end = numCities - 1;
+    if (start > end)
     {
-        // TODO: we should replace the whole population
-        int offspringIdx = half + idx;
-        curandState localState = states[idx];
+        int tmp = start;
+        start = end;
+        end = tmp;
+    }
 
-        // Retrieve parents
-        int parent1 = d_population[offspringIdx * numCities];
-        int parent2 = d_population[offspringIdx * numCities + 1];
+    // Copy parent1 segment
+    int *child = &d_population[offspringIdx * numCities];
+    int *p1 = &d_population[parent1 * numCities];
+    int *p2 = &d_population[parent2 * numCities];
 
-        // Perform order crossover
-        int start = (int)(curand_uniform(&localState) * numCities);
-        if (start >= numCities)
-            start = numCities - 1;
-        int end = (int)(curand_uniform(&localState) * numCities);
-        if (end >= numCities)
-            end = numCities - 1;
-        if (start > end)
+
+    for (int i = start; i <= end; i++)
+    {
+        child[i] += (p1[i] % (numCities + 1)) * (numCities + 1);
+    }
+
+    int currentIndex = 0;
+    for (int i = 0; i < numCities; i++)
+    {
+        int val = p2[i] % (numCities + 1);
+        bool found = false;
+        // Check if val is already in child
+        for (int j = start; j <= end; j++)
         {
-            int tmp = start;
-            start = end;
-            end = tmp;
-        }
-
-        // Copy parent1 segment
-        int *child = &d_population[offspringIdx * numCities];
-        int *p1 = &d_population[parent1 * numCities];
-        int *p2 = &d_population[parent2 * numCities];
-
-        // Mark child as empty
-        for (int i = 0; i < numCities; i++)
-        {
-            child[i] = -1;
-        }
-
-        for (int i = start; i <= end; i++)
-        {
-            child[i] = p1[i];
-        }
-
-        int currentIndex = 0;
-        for (int i = 0; i < numCities; i++)
-        {
-            int val = p2[i];
-            bool found = false;
-            // Check if val is already in child
-            // TODO: For large numCities, consider optimization or a hash table approach
-            for (int j = start; j <= end; j++)
+            if (child[j] / (numCities + 1) == val)
             {
-                if (child[j] == val)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-            {
-                // find next available slot
-                while (child[currentIndex] != -1)
-                    currentIndex++;
-                child[currentIndex] = val;
+                found = true;
+                break;
             }
         }
+        if (!found)
+        {
+            // find next available slot
+            while (child[currentIndex] >= numCities + 1)
+                currentIndex++;
+            child[currentIndex] += val * (numCities + 1);
+        }
+    }
 
-        states[idx] = localState;
+    states[idx] = localState;
+}
+
+__global__ void removeMaskKernel(int *d_population, int populationSize, int numCities, curandState *states)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Skip the top one individual
+    if (idx == 0 || idx >= populationSize)
+        return;
+
+    int offspringIdx = idx;
+    int *child = &d_population[offspringIdx * numCities];
+
+    for (int i = 0; i < numCities; i++)
+    {
+        child[i] /= (numCities + 1);
     }
 }
 
@@ -438,6 +433,12 @@ int main(int argc, char **argv)
                 cudaDeviceSynchronize();
             }
 
+            // Copy best individual
+            {
+                copyBestIndividualKernel<<<1, 1>>>(d_bestTour, d_bestFitness, d_population, populationSize, numCities);
+                cudaDeviceSynchronize();
+            }
+
             double currentBestFitness;
             CUDA_CHECK(cudaMemcpy(&currentBestFitness, d_bestFitness, sizeof(double), cudaMemcpyDeviceToHost));
 
@@ -461,7 +462,6 @@ int main(int argc, char **argv)
                 break;
             }
 
-
             // Selection
             // Select 2 parents from the top 50% of the population
             {
@@ -471,13 +471,19 @@ int main(int argc, char **argv)
                 cudaDeviceSynchronize();
             }
 
-            copyBestIndividualKernel<<<1, 1>>>(d_fitness, d_population, populationSize, numCities);
             // Crossover
             // Crossover the selected parents pairs, replacing the bottom 50% of the population
             {
                 int half = populationSize / 2;
                 int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 crossoverKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, d_states);
+                cudaDeviceSynchronize();
+            }
+
+            // Remove mask
+            {
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                removeMaskKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, d_states);
                 cudaDeviceSynchronize();
             }
 
