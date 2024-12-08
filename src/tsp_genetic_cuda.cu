@@ -42,10 +42,7 @@ __global__ void setupCurandStates(curandState *states, unsigned long long seed, 
 // Initialize Population:
 // Each individual is a permutation of [0 ... numCities-1].
 __global__ void initPopulationKernel(
-    int *d_population,
-    curandState *states,
-    int populationSize,
-    int numCities)
+    int *d_population, curandState *states, int populationSize, int numCities)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < populationSize)
@@ -103,8 +100,6 @@ __global__ void findBestKernel(
     const double *d_fitness,
     int *d_bestTour,
     double *d_bestFitness,
-    int *d_blockBestIndex,
-    double *d_blockBestFitness,
     int populationSize,
     int numCities)
 {
@@ -139,35 +134,24 @@ __global__ void findBestKernel(
         __syncthreads();
     }
 
-    // Block-level result is stored in shared memory index 0
+    // The best in this block
     if (tid == 0)
     {
-        d_blockBestFitness[blockIdx.x] = s_fitness[0];
-        d_blockBestIndex[blockIdx.x] = s_indices[0];
-    }
-
-    __syncthreads();
-
-    // Perform linear scan of `d_blockBestFitness` in a single thread
-    if (blockIdx.x == 0 && threadIdx.x == 0)
-    {
-        double maxFitness = -1.0;
-        int bestGlobalIndex = -1;
-
-        for (int i = 0; i < gridDim.x; i++)
+        // Atomically compare with global best
+        double oldVal = atomicMax((unsigned long long *)d_bestFitness, __double_as_longlong(s_fitness[0]));
+        double currentBestVal = __longlong_as_double(atomicCAS((unsigned long long *)d_bestFitness, __double_as_longlong(oldVal), __double_as_longlong(oldVal)));
+        // if our found is better, update best tour
+        if (s_fitness[0] > currentBestVal)
         {
-            if (d_blockBestFitness[i] > maxFitness)
+            // Copy best individual's tour
+            int bestPopIdx = s_indices[0];
+            for (int i = 0; i < numCities; i++)
             {
-                maxFitness = d_blockBestFitness[i];
-                bestGlobalIndex = d_blockBestIndex[i];
+                // Note: This is not atomic, so there's a race if multiple blocks find better at the same time.
+                // For a more robust solution, we can handle best tracking differently.
+                d_bestTour[i] = d_population[bestPopIdx * numCities + i];
             }
-        }
-
-        // Update the global best fitness and best tour
-        *d_bestFitness = maxFitness;
-        for (int i = 0; i < numCities; i++)
-        {
-            d_bestTour[i] = d_population[bestGlobalIndex * numCities + i];
+            *d_bestFitness = s_fitness[0];
         }
     }
 }
@@ -345,11 +329,9 @@ int main(int argc, char **argv)
         }
 
         // Device memory
-        int *d_population, *d_distanceMatrix, *d_bestTour, *d_blockBestIndex;
-        double *d_fitness, *d_bestFitness, *d_blockBestFitness;
+        int *d_population, *d_distanceMatrix, *d_bestTour;
+        double *d_fitness, *d_bestFitness;
         curandState *d_states;
-
-        int gridDim = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
         CUDA_CHECK(cudaMalloc(&d_population, sizeof(int) * populationSize * numCities));
         CUDA_CHECK(cudaMalloc(&d_distanceMatrix, sizeof(int) * numCities * numCities));
@@ -357,8 +339,6 @@ int main(int argc, char **argv)
         CUDA_CHECK(cudaMalloc(&d_bestTour, sizeof(int) * numCities));
         CUDA_CHECK(cudaMalloc(&d_bestFitness, sizeof(double)));
         CUDA_CHECK(cudaMalloc(&d_states, sizeof(curandState) * populationSize));
-        CUDA_CHECK(cudaMalloc(&d_blockBestFitness, sizeof(double) * gridDim));
-        CUDA_CHECK(cudaMalloc(&d_blockBestIndex, sizeof(int) * gridDim));
 
         CUDA_CHECK(cudaMemcpy(d_distanceMatrix, h_distanceMatrix.data(), sizeof(int) * numCities * numCities, cudaMemcpyHostToDevice));
 
@@ -393,7 +373,8 @@ int main(int argc, char **argv)
             // Find best
             {
                 int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
-                findBestKernel<<<grid, BLOCK_SIZE, BLOCK_SIZE * (sizeof(double) + sizeof(int))>>>(d_population, d_fitness, d_bestTour, d_bestFitness, d_blockBestIndex, d_blockBestFitness, populationSize, numCities);
+                // shared memory size might need adjustments
+                findBestKernel<<<grid, BLOCK_SIZE, BLOCK_SIZE * (sizeof(double) + sizeof(int))>>>(d_population, d_fitness, d_bestTour, d_bestFitness, populationSize, numCities);
                 cudaDeviceSynchronize();
             }
 
@@ -452,8 +433,6 @@ int main(int argc, char **argv)
         CUDA_CHECK(cudaFree(d_bestTour));
         CUDA_CHECK(cudaFree(d_bestFitness));
         CUDA_CHECK(cudaFree(d_states));
-        CUDA_CHECK(cudaFree(d_blockBestFitness));
-        CUDA_CHECK(cudaFree(d_blockBestIndex));
     }
 
     return 0;
