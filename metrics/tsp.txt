@@ -1,0 +1,113 @@
+Test Case 0:
+Number of Cities: 3
+Time Taken: 3.3296e-05 seconds
+Best Distance: 74
+Expected Distance: 74
+Best Tour: 2 1 0 
+-----------------------------------------
+Test Case 1:
+Number of Cities: 4
+Time Taken: 6.8012e-05 seconds
+Best Distance: 53
+Expected Distance: 53
+Best Tour: 2 1 3 0 
+-----------------------------------------
+Test Case 2:
+Number of Cities: 5
+Time Taken: 0.000181 seconds
+Best Distance: 61
+Expected Distance: 61
+Best Tour: 3 1 4 2 0 
+-----------------------------------------
+Test Case 3:
+Number of Cities: 6
+Time Taken: 0.000451585 seconds
+Best Distance: 68
+Expected Distance: 68
+Best Tour: 5 3 2 1 4 0 
+-----------------------------------------
+Test Case 4:
+Number of Cities: 7
+Time Taken: 0.00126618 seconds
+Best Distance: 74
+Expected Distance: 74
+Best Tour: 3 4 1 6 2 5 0 
+-----------------------------------------
+Test Case 5:
+Number of Cities: 8
+Time Taken: 0.00307854 seconds
+Best Distance: 103
+Expected Distance: 103
+Best Tour: 1 4 5 2 6 7 3 0 
+-----------------------------------------
+Test Case 6:
+Number of Cities: 9
+Time Taken: 0.00679773 seconds
+Best Distance: 76
+Expected Distance: 76
+Best Tour: 6 5 3 8 4 7 1 2 0 
+-----------------------------------------
+Test Case 7:
+Number of Cities: 10
+Time Taken: 0.0134412 seconds
+Best Distance: 118
+Expected Distance: 118
+Best Tour: 9 4 6 5 2 1 7 3 8 0 
+-----------------------------------------
+Test Case 8:
+Number of Cities: 11
+Time Taken: 0.0292886 seconds
+Best Distance: 86
+Expected Distance: 86
+Best Tour: 5 9 3 6 10 2 1 7 4 8 0 
+-----------------------------------------
+Test Case 9:
+Number of Cities: 12
+Time Taken: 0.0653507 seconds
+Best Distance: 82
+Expected Distance: 82
+Best Tour: 11 8 1 9 7 10 4 6 5 2 3 0 
+-----------------------------------------
+Test Case 10:
+Number of Cities: 13
+Time Taken: 0.150271 seconds
+Best Distance: 86
+Expected Distance: 86
+Best Tour: 11 10 1 9 8 4 7 2 3 12 5 6 0 
+-----------------------------------------
+Test Case 11:
+Number of Cities: 14
+Time Taken: 0.345487 seconds
+Best Distance: 79
+Expected Distance: 79
+Best Tour: 5 8 1 9 6 12 11 10 2 4 7 13 3 0 
+-----------------------------------------
+Test Case 12:
+Number of Cities: 15
+Time Taken: 0.765904 seconds
+Best Distance: 86
+Expected Distance: 86
+Best Tour: 7 4 3 5 10 2 14 1 11 12 9 6 13 8 0 
+-----------------------------------------
+Test Case 13:
+Number of Cities: 16
+Time Taken: 1.73057 seconds
+Best Distance: 89
+Expected Distance: 89
+Best Tour: 8 1 7 4 15 10 5 12 13 11 2 9 6 3 14 0 
+-----------------------------------------
+Test Case 14:
+Number of Cities: 17
+Time Taken: 3.84704 seconds
+Best Distance: 93
+Expected Distance: 93
+Best Tour: 14 7 2 9 6 13 12 3 11 16 5 4 8 10 1 15 0 
+-----------------------------------------
+Test Case 15:
+Number of Cities: 18
+Time Taken: 8.70842 seconds
+Best Distance: 111
+Expected Distance: 111
+Best Tour: 9 2 4 11 5 3 8 13 1 16 14 12 15 6 7 10 17 0 
+-----------------------------------------
+Segmentation fault

@@ -1,0 +1,158 @@
+ling8@maple:~/project/cudaTspGenectic$ ./build/src/tsp_genetic_cuda 10000 0.1 1024
+Running Genetic Algorithm with the following parameters:
+Generations: 10000
+Mutation Rate: 0.1
+Population Size: 1024
+
+Terminating early due to convergence detection.
+Test Case 0:
+Number of Cities: 3
+Time Taken: 0.29685 seconds
+Best Distance: 74
+Expected Distance: 74
+Best Tour: 2 1 0 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 1:
+Number of Cities: 4
+Time Taken: 0.0924828 seconds
+Best Distance: 53
+Expected Distance: 53
+Best Tour: 2 1 3 0 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 2:
+Number of Cities: 5
+Time Taken: 0.0956978 seconds
+Best Distance: 61
+Expected Distance: 61
+Best Tour: 0 3 1 4 2 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 3:
+Number of Cities: 6
+Time Taken: 0.100375 seconds
+Best Distance: 68
+Expected Distance: 68
+Best Tour: 2 1 4 0 5 3 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 4:
+Number of Cities: 7
+Time Taken: 0.104818 seconds
+Best Distance: 74
+Expected Distance: 74
+Best Tour: 1 3 4 6 2 5 0 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 5:
+Number of Cities: 8
+Time Taken: 0.106892 seconds
+Best Distance: 103
+Expected Distance: 103
+Best Tour: 6 0 1 4 5 3 2 7 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 6:
+Number of Cities: 9
+Time Taken: 0.115359 seconds
+Best Distance: 76
+Expected Distance: 76
+Best Tour: 5 3 2 0 6 1 7 4 8 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 7:
+Number of Cities: 10
+Time Taken: 0.12311 seconds
+Best Distance: 118
+Expected Distance: 118
+Best Tour: 5 7 3 8 0 4 6 9 2 1 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 8:
+Number of Cities: 11
+Time Taken: 0.132754 seconds
+Best Distance: 86
+Expected Distance: 86
+Best Tour: 1 10 0 5 9 2 3 7 8 4 6 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 9:
+Number of Cities: 12
+Time Taken: 0.140774 seconds
+Best Distance: 89
+Expected Distance: 82
+Best Tour: 0 11 8 9 2 3 1 10 4 6 5 7 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 10:
+Number of Cities: 13
+Time Taken: 0.151665 seconds
+Best Distance: 86
+Expected Distance: 86
+Best Tour: 5 12 11 3 9 8 4 7 6 1 0 10 2 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 11:
+Number of Cities: 14
+Time Taken: 0.166655 seconds
+Best Distance: 83
+Expected Distance: 79
+Best Tour: 2 10 1 9 11 7 4 12 13 3 0 6 5 8 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 12:
+Number of Cities: 15
+Time Taken: 0.193334 seconds
+Best Distance: 99
+Expected Distance: 86
+Best Tour: 1 8 0 10 2 13 12 6 3 5 7 14 11 4 9 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 13:
+Number of Cities: 16
+Time Taken: 0.188624 seconds
+Best Distance: 98
+Expected Distance: 89
+Best Tour: 9 3 10 7 4 15 12 2 13 0 8 1 5 6 14 11 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 14:
+Number of Cities: 17
+Time Taken: 0.275075 seconds
+Best Distance: 107
+Expected Distance: 93
+Best Tour: 2 11 5 9 1 13 14 12 3 15 10 6 7 4 8 16 0 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 15:
+Number of Cities: 18
+Time Taken: 0.243423 seconds
+Best Distance: 135
+Expected Distance: 111
+Best Tour: 7 6 8 15 5 4 17 14 2 10 0 9 16 13 11 12 1 3 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 16:
+Number of Cities: 29
+Time Taken: 0.404249 seconds
+Best Distance: 31508
+Expected Distance: 27603
+Best Tour: 24 14 7 5 2 4 27 21 22 23 20 12 9 10 11 8 19 16 26 25 15 6 3 0 1 13 17 28 18 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 17:
+Number of Cities: 38
+Time Taken: 0.673242 seconds
+Best Distance: 8591
+Expected Distance: 6656
+Best Tour: 35 37 32 17 24 29 22 18 21 7 1 25 28 20 0 14 5 12 2 11 4 16 23 30 26 15 3 19 13 6 36 9 27 8 10 33 31 34 
+-----------------------------------------
+Terminating early due to convergence detection.
+Test Case 18:
+Number of Cities: 194
+Time Taken: 12.9198 seconds
+Best Distance: 65556
+Expected Distance: 9352
+Best Tour: 126 137 90 181 186 187 102 155 171 55 164 142 154 97 114 132 58 128 166 63 18 41 64 48 51 83 82 40 78 53 36 109 167 24 160 177 92 139 107 118 125 74 183 94 123 111 70 133 67 93 76 35 124 69 134 12 7 49 99 84 3 61 104 170 192 138 185 57 59 11 173 116 112 184 65 17 189 91 30 37 150 2 127 33 66 21 25 20 141 179 31 9 54 156 145 80 87 68 89 180 122 4 108 130 158 10 42 1 52 86 88 81 174 175 149 43 46 28 8 103 32 85 6 60 106 131 151 27 110 191 193 77 190 143 182 178 113 95 148 34 39 44 5 169 147 79 96 62 38 72 13 120 47 121 75 115 29 73 56 19 135 140 159 163 176 153 162 136 144 129 0 100 161 45 117 105 172 165 146 15 101 168 98 71 16 26 14 22 157 50 188 152 23 119 
+-----------------------------------------
