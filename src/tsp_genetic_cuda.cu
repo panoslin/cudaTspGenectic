@@ -42,7 +42,10 @@ __global__ void setupCurandStates(curandState *states, unsigned long long seed, 
 // Initialize Population:
 // Each individual is a permutation of [0 ... numCities-1].
 __global__ void initPopulationKernel(
-    int *d_population, curandState *states, int populationSize, int numCities)
+    int *d_population,
+    curandState *states,
+    int populationSize,
+    int numCities)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < populationSize)
@@ -58,6 +61,8 @@ __global__ void initPopulationKernel(
         for (int i = numCities - 1; i > 0; i--)
         {
             int j = (int)(curand_uniform(&localState) * (i + 1));
+            if (j > i)
+                j = i; // clamp
             int temp = d_population[start + i];
             d_population[start + i] = d_population[start + j];
             d_population[start + j] = temp;
@@ -179,12 +184,20 @@ __global__ void selectionKernel(
 
         // tournament for parent1
         int p1 = (int)(curand_uniform(&localState) * half);
+        if (p1 >= half)
+            p1 = half - 1;
         int p2 = (int)(curand_uniform(&localState) * half);
+        if (p2 >= half)
+            p2 = half - 1;
         int parent1 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
 
         // tournament for parent2
         p1 = (int)(curand_uniform(&localState) * half);
+        if (p1 >= half)
+            p1 = half - 1;
         p2 = (int)(curand_uniform(&localState) * half);
+        if (p2 >= half)
+            p2 = half - 1;
         int parent2 = (d_fitness[p1] > d_fitness[p2]) ? p1 : p2;
 
         // Store chosen parents in place
@@ -216,7 +229,11 @@ __global__ void crossoverKernel(int *d_population, int populationSize, int numCi
 
         // Perform order crossover
         int start = (int)(curand_uniform(&localState) * numCities);
+        if (start >= numCities)
+            start = numCities - 1;
         int end = (int)(curand_uniform(&localState) * numCities);
+        if (end >= numCities)
+            end = numCities - 1;
         if (start > end)
         {
             int tmp = start;
@@ -283,7 +300,11 @@ __global__ void mutationKernel(int *d_population, int populationSize, int numCit
         if (curand_uniform(&localState) < mutationRate)
         {
             int i = (int)(curand_uniform(&localState) * numCities);
+            if (i >= numCities)
+                i = numCities - 1;
             int j = (int)(curand_uniform(&localState) * numCities);
+            if (j >= numCities)
+                j = numCities - 1;
             int *child = &d_population[offspringIdx * numCities];
             int temp = child[i];
             child[i] = child[j];
@@ -308,6 +329,11 @@ int main(int argc, char **argv)
     int generations = atoi(argv[1]);
     double mutationRate = atof(argv[2]);
     int populationSize = atoi(argv[3]);
+
+    cout << "Running Genetic Algorithm with the following parameters:\n";
+    cout << "Generations: " << generations << "\n";
+    cout << "Mutation Rate: " << mutationRate << "\n";
+    cout << "Population Size: " << populationSize << "\n\n";
 
     // Iterate over test cases defined in testcases.h
     for (size_t test_i = 0; test_i < testcases.size(); ++test_i)
@@ -360,12 +386,10 @@ int main(int argc, char **argv)
             cudaDeviceSynchronize();
         }
 
-
-
-        size_t stagnationCounter = 0;         // Tracks stagnation
-        double epsilon = 1e-9;                // Minimum improvement considered significant
-        size_t maxStagnationGenerations = 2000; // Maximum allowed stagnation generations
-        double previousBestFitness = 0.0;     // Fitness from the previous generation
+        size_t stagnationCounter = 0;           // Tracks stagnation
+        double epsilon = 1e-9;                  // Minimum improvement considered significant
+        size_t maxStagnationGenerations = 3000; // Maximum allowed stagnation generations
+        double previousBestFitness = 0.0;       // Fitness from the previous generation
 
         // Main GA loop
         for (int gen = 0; gen < generations; gen++)
@@ -435,7 +459,7 @@ int main(int argc, char **argv)
             }
         }
 
-        // Copy back best result
+        // Final global best after last generation
         double hostBestFitness;
         vector<int> hostBestTour(numCities);
         CUDA_CHECK(cudaMemcpy(&hostBestFitness, d_bestFitness, sizeof(double), cudaMemcpyDeviceToHost));
