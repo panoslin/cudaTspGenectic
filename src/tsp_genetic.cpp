@@ -157,8 +157,19 @@ public:
     }
 };
 
-int main()
+int main(int argc, char *argv[])
 {
+
+    // Genetic Algorithm parameters
+    if (argc != 4) {
+        printf("Usage: %s <generations> <mutation_rate> <population_size>\n", argv[0]);
+        return 1;
+    }
+
+    int generations = atoi(argv[1]);
+    double mutationRate = atof(argv[2]);
+    int populationSize = atoi(argv[3]);
+
     for (size_t i = 0; i < testcases.size(); ++i)
     {
         const auto &[distanceMatrix, expected] = testcases[i];
@@ -166,22 +177,23 @@ int main()
         auto start_time = chrono::high_resolution_clock::now();
 
         // Create GeneticAlgorithmTSP instance
-        GeneticAlgorithmTSP ga(distanceMatrix);
+        GeneticAlgorithmTSP ga(distanceMatrix, populationSize, generations, mutationRate);
 
         // Solve the TSP
         auto [bestDistance, bestTour] = ga.solve();
 
         auto end_time = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed_time = end_time - start_time;
-        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
 
-        // Output the results
+        cout << "Test Case " << i << ":\n";
+        cout << "Number of Cities: " << distanceMatrix.size() << "\n";
+        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
+        cout << "Best Distance: " << bestDistance << "\n";
+        cout << "Expected Distance: " << expected << "\n";
         cout << "Best Tour: ";
-        for (int city : bestTour)
-            cout << city << " ";
-        cout << "\nBest Distance: " << bestDistance << endl;
-        cout << "Expected Distance: " << expected << endl;
-        cout << "-----------------------------------------\n";
+        for (auto c : bestTour)
+            cout << c << " ";
+        cout << "\n-----------------------------------------\n";
     }
     return 0;
 }

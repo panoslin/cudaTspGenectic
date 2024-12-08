@@ -312,12 +312,18 @@ __global__ void mutationKernel(int *d_population, int populationSize, int numCit
 
 //------------------------------------------------------
 // Host Code
-int main()
+int main(int argc, char **argv)
 {
     // Genetic Algorithm parameters
-    int generations = 1000;
-    double mutationRate = 0.1;
-    int populationSize = 512;
+    if (argc != 4)
+    {
+        printf("Usage: %s <generations> <mutation_rate> <population_size>\n", argv[0]);
+        return 1;
+    }
+
+    int generations = atoi(argv[1]);
+    double mutationRate = atof(argv[2]);
+    int populationSize = atoi(argv[3]);
 
     // Iterate over test cases defined in testcases.h
     for (size_t test_i = 0; test_i < testcases.size(); ++test_i)
@@ -429,10 +435,10 @@ int main()
         auto end = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed_time = end - start;
 
-        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
         cout << "Test Case " << test_i << ":\n";
         cout << "Number of Cities: " << numCities << "\n";
-        cout << "Best Distance Found: " << bestDistance << "\n";
+        cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
+        cout << "Best Distance: " << bestDistance << "\n";
         cout << "Expected Distance: " << expectedDistance << "\n";
         cout << "Best Tour: ";
         for (auto c : hostBestTour)
