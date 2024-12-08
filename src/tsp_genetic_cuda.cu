@@ -24,7 +24,7 @@ using namespace std;
 
 //------------------------------------------------------
 // Kernel Parameters
-#define BLOCK_SIZE 128
+#define BLOCK_SIZE 1024
 
 //------------------------------------------------------
 // Device Kernels
@@ -62,7 +62,7 @@ __global__ void initPopulationKernel(
         {
             int j = (int)(curand_uniform(&localState) * (i + 1));
             if (j > i)
-                j = i; // clamp
+                j = i;
             int temp = d_population[start + i];
             d_population[start + i] = d_population[start + j];
             d_population[start + j] = temp;
@@ -99,7 +99,7 @@ __global__ void fitnessKernel(
 }
 
 // Find Best Individual Kernel
-// Single-block reduction for simplicity (assumes populationSize <= blockDim.x *gridDim.x adequately)
+// Single-block reduction for simplicity (assumes populationSize <= 1024)
 __global__ void findBestKernel(
     const int *d_population,
     const double *d_fitness,
@@ -152,9 +152,8 @@ __global__ void findBestKernel(
             int bestPopIdx = s_indices[0];
             for (int i = 0; i < numCities; i++)
             {
-                // TODO: FIX THIS
+                // TODO: FIX THIS for larger populations (i.e. > 1024)
                 // Note: This is not atomic, so there's a race if multiple blocks find better at the same time.
-                // For a more robust solution, we can handle best tracking differently.
                 d_bestTour[i] = d_population[bestPopIdx * numCities + i];
             }
             *d_bestFitness = s_fitness[0];
@@ -260,7 +259,6 @@ __global__ void crossoverKernel(int *d_population, int populationSize, int numCi
     int *p1 = &d_population[parent1 * numCities];
     int *p2 = &d_population[parent2 * numCities];
 
-
     for (int i = start; i <= end; i++)
     {
         child[i] += (p1[i] % (numCities + 1)) * (numCities + 1);
@@ -310,15 +308,13 @@ __global__ void removeMaskKernel(int *d_population, int populationSize, int numC
 }
 
 // Mutation Kernel (Swap mutation):
-// Mutate bottom half of the population.
 // Randomly swap two cities in each individual.
 __global__ void mutationKernel(int *d_population, int populationSize, int numCities, double mutationRate, curandState *states)
 {
-    int half = populationSize / 2;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < half)
+    if (idx > 0)
     {
-        int offspringIdx = half + idx;
+        int offspringIdx = idx;
         curandState localState = states[idx];
 
         if (curand_uniform(&localState) < mutationRate)
@@ -360,8 +356,8 @@ int main(int argc, char **argv)
     cout << "Population Size: " << populationSize << "\n\n";
 
     size_t stagnationCounter = 0;           // Tracks stagnation
-    double epsilon = 1e-9;                  // Minimum improvement considered significant
-    size_t maxStagnationGenerations = 8000; // Maximum allowed stagnation generations
+    double epsilon = 1e-7;                  // Minimum improvement considered significant
+    size_t maxStagnationGenerations = 1000; // Maximum allowed stagnation generations
     double previousBestFitness = 0.0;       // Fitness from the previous generation
 
     // Iterate over test cases defined in testcases.h
@@ -445,14 +441,13 @@ int main(int argc, char **argv)
             // Check for improvement
             if (abs(currentBestFitness - previousBestFitness) < epsilon)
             {
-                stagnationCounter++; // Increment stagnation count
+                stagnationCounter++;
             }
             else
             {
-                stagnationCounter = 0; // Reset stagnation count
+                stagnationCounter = 0;
             }
 
-            // Update the previous fitness value
             previousBestFitness = currentBestFitness;
 
             // Terminate if stagnation persists
@@ -465,22 +460,20 @@ int main(int argc, char **argv)
             // Selection
             // Select 2 parents from the top 50% of the population
             {
-                int half = populationSize / 2;
-                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 selectionKernel<<<grid, BLOCK_SIZE>>>(d_fitness, d_population, populationSize, numCities, d_states);
                 cudaDeviceSynchronize();
             }
 
             // Crossover
-            // Crossover the selected parents pairs, replacing the bottom 50% of the population
+            // Crossover the selected parents pairs, replacing all population except the best one
             {
-                int half = populationSize / 2;
-                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 crossoverKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, d_states);
                 cudaDeviceSynchronize();
             }
 
-            // Remove mask
+            // Remove mask values
             {
                 int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 removeMaskKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, d_states);
@@ -489,8 +482,7 @@ int main(int argc, char **argv)
 
             // Mutation
             {
-                int half = populationSize / 2;
-                int grid = (half + BLOCK_SIZE - 1) / BLOCK_SIZE;
+                int grid = (populationSize + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 mutationKernel<<<grid, BLOCK_SIZE>>>(d_population, populationSize, numCities, mutationRate, d_states);
                 cudaDeviceSynchronize();
             }
