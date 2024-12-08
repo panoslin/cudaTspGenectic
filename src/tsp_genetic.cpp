@@ -110,6 +110,11 @@ public:
         vector<int> bestTour;
         double bestFitness = 0.0;
 
+        size_t stagnationCounter = 0;         // Tracks stagnation
+        double epsilon = 1e-7;                // Minimum improvement considered significant
+        size_t maxStagnationGenerations = 100; // Maximum allowed stagnation generations
+        double previousBestFitness = 0.0;     // Fitness from the previous generation
+
         for (size_t gen = 0; gen < generations; ++gen)
         {
             // Calculate fitness for all individuals
@@ -127,6 +132,27 @@ public:
 
             // Sort population by fitness (descending order)
             sort(fitnessScores.rbegin(), fitnessScores.rend());
+
+            double currentBestFitness = fitnessScores[0].first; // Assuming fitnessScores is sorted
+            // Check for improvement
+            if (abs(currentBestFitness - previousBestFitness) < epsilon)
+            {
+                stagnationCounter++; // Increment stagnation count
+            }
+            else
+            {
+                stagnationCounter = 0; // Reset stagnation count
+            }
+
+            // Update the previous fitness value
+            previousBestFitness = currentBestFitness;
+
+            // Terminate if stagnation persists
+            if (stagnationCounter >= maxStagnationGenerations)
+            {
+                cout << "Terminating early due to convergence detection.\n";
+                break;
+            }
 
             // Elitism: Retain the best individual
             vector<vector<int>> newPopulation = {fitnessScores[0].second};
@@ -161,7 +187,8 @@ int main(int argc, char *argv[])
 {
 
     // Genetic Algorithm parameters
-    if (argc != 4) {
+    if (argc != 4)
+    {
         printf("Usage: %s <generations> <mutation_rate> <population_size>\n", argv[0]);
         return 1;
     }

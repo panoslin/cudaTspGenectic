@@ -360,6 +360,13 @@ int main(int argc, char **argv)
             cudaDeviceSynchronize();
         }
 
+
+
+        size_t stagnationCounter = 0;         // Tracks stagnation
+        double epsilon = 1e-9;                // Minimum improvement considered significant
+        size_t maxStagnationGenerations = 2000; // Maximum allowed stagnation generations
+        double previousBestFitness = 0.0;     // Fitness from the previous generation
+
         // Main GA loop
         for (int gen = 0; gen < generations; gen++)
         {
@@ -376,6 +383,29 @@ int main(int argc, char **argv)
                 // shared memory size might need adjustments
                 findBestKernel<<<grid, BLOCK_SIZE, BLOCK_SIZE * (sizeof(double) + sizeof(int))>>>(d_population, d_fitness, d_bestTour, d_bestFitness, populationSize, numCities);
                 cudaDeviceSynchronize();
+            }
+
+            double currentBestFitness;
+            CUDA_CHECK(cudaMemcpy(&currentBestFitness, d_bestFitness, sizeof(double), cudaMemcpyDeviceToHost));
+
+            // Check for improvement
+            if (abs(currentBestFitness - previousBestFitness) < epsilon)
+            {
+                stagnationCounter++; // Increment stagnation count
+            }
+            else
+            {
+                stagnationCounter = 0; // Reset stagnation count
+            }
+
+            // Update the previous fitness value
+            previousBestFitness = currentBestFitness;
+
+            // Terminate if stagnation persists
+            if (stagnationCounter >= maxStagnationGenerations)
+            {
+                cout << "Terminating early due to convergence detection.\n";
+                break;
             }
 
             // Selection

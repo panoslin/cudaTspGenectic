@@ -65,17 +65,16 @@ int main()
         auto [cost, path] = TSP::travel(weights);
         auto end_time = chrono::high_resolution_clock::now();
 
-        cout << "Test Case " << i + 1 << ":\n";
-        cout << "Expected Cost: " << expected << "\n";
-        cout << "Calculated Cost: " << cost << "\n";
-        cout << "Path: ";
-        for (int node : path)
-            cout << node << " ";
-        cout << "\n";
-
         chrono::duration<double> elapsed_time = end_time - start_time;
+        cout << "Test Case " << i << ":\n";
+        cout << "Number of Cities: " << weights.size() << "\n";
         cout << "Time Taken: " << elapsed_time.count() << " seconds\n";
-        cout << "-----------------------------------------\n";
+        cout << "Best Distance: " << cost << "\n";
+        cout << "Expected Distance: " << expected << "\n";
+        cout << "Best Tour: ";
+        for (auto c : path)
+            cout << c << " ";
+        cout << "\n-----------------------------------------\n";
     }
 
     return 0;
